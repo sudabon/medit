@@ -28,5 +28,15 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.vscode/
+.specstory/
+
+# CodingAgent
+.cursor/
+.claude/
+.codex/
+
+# Cursor
+.cursorrules
+.cursorignore
+.cursorindexingignore
