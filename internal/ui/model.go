@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 	"github.com/sudabon/medit/internal/loader"
 	"github.com/sudabon/medit/internal/render"
@@ -17,7 +20,7 @@ import (
 
 const (
 	statusHeight = 1
-	keyHints     = "e:edit r:reload t:theme q:quit"
+	keyHints     = "s:search e:edit r:reload t:theme q:quit"
 )
 
 func statusBarStyle(theme render.Theme) lipgloss.Style {
@@ -49,6 +52,14 @@ type Model struct {
 	pendingG bool
 	message  string
 	errMsg   string
+
+	// lines is the rendered document before search highlighting.
+	lines     []string
+	searching bool
+	input     textinput.Model
+	query     string
+	matches   []searchMatch
+	matchIdx  int
 }
 
 // Run starts the TUI for the given document.
@@ -61,9 +72,13 @@ func Run(doc *loader.Document) error {
 
 // New constructs a viewer model.
 func New(doc *loader.Document) Model {
+	input := textinput.New()
+	input.Prompt = "search: "
+	input.Cursor.SetMode(cursor.CursorStatic)
 	return Model{
 		doc:      doc,
 		renderer: render.New(),
+		input:    input,
 	}
 }
 
@@ -127,6 +142,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.searching {
+		return m.handleSearchKey(msg)
+	}
+
 	// Clear transient messages on interaction (except after editor).
 	clearMsg := true
 
@@ -153,6 +172,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.viewport.SetYOffset(y)
 			}
 		}
+		return m, nil
+
+	case "s":
+		m.pendingG = false
+		m.message = ""
+		m.searching = true
+		m.input.Width = max(1, m.width-runewidth.StringWidth(m.input.Prompt)-1)
+		m.input.SetValue("")
+		return m, m.input.Focus()
+
+	case "n":
+		m.pendingG = false
+		m.message = ""
+		m.stepMatch(1)
+		return m, nil
+
+	case "p":
+		m.pendingG = false
+		m.message = ""
+		m.stepMatch(-1)
+		return m, nil
+
+	case "esc":
+		m.pendingG = false
+		m.message = ""
+		m.clearSearch()
 		return m, nil
 
 	case "t":
@@ -214,6 +259,81 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.searching = false
+		m.input.Blur()
+		if q := m.input.Value(); q != "" {
+			m.runSearch(q)
+		}
+		return m, nil
+
+	case "esc", "ctrl+c":
+		m.searching = false
+		m.input.Blur()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+// runSearch finds query in the rendered document and jumps to the first
+// match at or below the top of the current view, wrapping to the start.
+func (m *Model) runSearch(query string) {
+	m.query = query
+	m.matches = findMatches(m.lines, query)
+	if len(m.matches) == 0 {
+		m.query = ""
+		m.refreshContent()
+		m.message = "not found: " + query
+		return
+	}
+	m.matchIdx = 0
+	for i, mt := range m.matches {
+		if mt.line >= m.viewport.YOffset {
+			m.matchIdx = i
+			break
+		}
+	}
+	m.refreshContent()
+	m.revealMatch()
+}
+
+// stepMatch moves to the next (dir > 0) or previous match, wrapping around.
+func (m *Model) stepMatch(dir int) {
+	if len(m.matches) == 0 {
+		return
+	}
+	n := len(m.matches)
+	m.matchIdx = ((m.matchIdx+dir)%n + n) % n
+	m.refreshContent()
+	m.revealMatch()
+}
+
+func (m *Model) clearSearch() {
+	if m.query == "" {
+		return
+	}
+	m.query = ""
+	m.matches = nil
+	m.matchIdx = 0
+	m.refreshContent()
+}
+
+// revealMatch scrolls so the current match is visible, placing it about a
+// third of the way down the screen when it is off-screen.
+func (m *Model) revealMatch() {
+	line := m.matches[m.matchIdx].line
+	top := m.viewport.YOffset
+	if line >= top && line < top+m.viewport.Height {
+		return
+	}
+	m.viewport.SetYOffset(max(0, line-m.viewport.Height/3))
+}
+
 func (m *Model) applyContent(force bool) error {
 	if force {
 		m.renderer.Invalidate()
@@ -223,8 +343,22 @@ func (m *Model) applyContent(force bool) error {
 	if err != nil {
 		return err
 	}
-	m.viewport.SetContent(out)
+	m.lines = strings.Split(out, "\n")
+	m.matches = findMatches(m.lines, m.query)
+	if m.matchIdx >= len(m.matches) {
+		m.matchIdx = 0
+	}
+	m.refreshContent()
 	return nil
+}
+
+// refreshContent pushes the rendered lines, with search highlights, into the viewport.
+func (m *Model) refreshContent() {
+	lines := m.lines
+	if len(m.matches) > 0 {
+		lines = highlightLines(m.lines, m.matches, m.matchIdx)
+	}
+	m.viewport.SetContent(strings.Join(lines, "\n"))
 }
 
 func (m *Model) restoreScrollPercent(percent float64) {
@@ -267,6 +401,14 @@ func (m Model) View() string {
 }
 
 func (m Model) statusBar() string {
+	if m.searching {
+		line := m.input.View()
+		if w := ansi.StringWidth(line); w < m.width {
+			line += strings.Repeat(" ", m.width-w)
+		}
+		return statusBarStyle(m.renderer.Theme()).Width(max(0, m.width)).Render(line)
+	}
+
 	name := filepath.Base(m.doc.Path)
 	pct := int(m.viewport.ScrollPercent() * 100)
 	left := name
@@ -274,6 +416,9 @@ func (m Model) statusBar() string {
 		left += " [New]"
 	}
 	left += fmt.Sprintf("  %d%%", pct)
+	if len(m.matches) > 0 {
+		left += fmt.Sprintf("  /%s [%d/%d]", m.query, m.matchIdx+1, len(m.matches))
+	}
 
 	msg := m.message
 	if m.errMsg != "" {

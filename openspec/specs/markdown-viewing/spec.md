@@ -38,6 +38,25 @@ TBD - created by archiving change markdown-viewer. Update Purpose after archive.
 - **WHEN** `q` を押す
 - **THEN** Viewer が終了し、端末が元の状態に復元される
 
+### Requirement: Text search
+
+システムは `s` で検索プロンプトをステータスバーに表示し、入力した文字列をレンダリング後の表示テキストから検索する（SHALL）。`Enter` で確定すると現在の表示位置以降の最初の一致（無ければ先頭からの最初の一致）へスクロールし、全一致をハイライトし、現在の一致を区別して表示する（SHALL）。`n` / `p` で次 / 前の一致へ循環移動し（SHALL）、`Esc` で入力の中止またはハイライトの解除を行う（SHALL）。検索語に大文字が含まれない場合は大文字小文字を区別しない（SHALL）。
+
+#### Scenario: 検索して一致へ移動する
+
+- **WHEN** 画面外に一致を含む文書で `s` を押し、検索語を入力して `Enter` を押す
+- **THEN** 一致する行が画面内に表示され、一致箇所がハイライトされ、ステータスバーに `[1/総数]` が表示される
+
+#### Scenario: 次 / 前の一致へ循環する
+
+- **WHEN** 検索確定後に `n` を繰り返し押す
+- **THEN** 一致を順に移動し、最後の一致の次は最初の一致に戻る
+
+#### Scenario: 一致しない
+
+- **WHEN** 文書に存在しない文字列を検索する
+- **THEN** ステータスバーに `not found` が表示され、表示位置は変わらない
+
 ### Requirement: Resize handling
 
 システムは端末サイズの変更を検知し、新しい幅で再レンダリングして表示位置（スクロール割合）を概ね維持する（SHALL）。
@@ -58,7 +77,7 @@ TBD - created by archiving change markdown-viewer. Update Purpose after archive.
 
 ### Requirement: Status bar
 
-システムは画面最下部にステータスバーを常時表示し、ファイル名・スクロール位置（%）・主要キーのヒント（`e:edit r:reload q:quit`）を表示する（SHALL）。エラーや通知のメッセージは同領域に一時表示する（SHALL）。
+システムは画面最下部にステータスバーを常時表示し、ファイル名・スクロール位置（%）・主要キーのヒント（`s:search e:edit r:reload t:theme q:quit`）を表示する（SHALL）。エラーや通知のメッセージは同領域に一時表示する（SHALL）。
 
 #### Scenario: ステータスバーの内容
 
