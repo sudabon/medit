@@ -1,6 +1,8 @@
 package render
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
 	styles "github.com/charmbracelet/glamour/styles"
@@ -300,18 +302,35 @@ func selectStyle(theme Theme) ansi.StyleConfig {
 	return highContrastDark
 }
 
+// renderMarkdown renders prose without Glamour's word wrap and wraps it with
+// wrapOverflow instead. Tables are laid out by Glamour to fit width.
 func renderMarkdown(content string, width int, theme Theme) (string, error) {
+	var b strings.Builder
+	for i, part := range splitTables(content) {
+		glamourWrap := 0
+		if part.isTable {
+			glamourWrap = width
+		}
+		out, err := glamourRender(part.markdown, glamourWrap, theme)
+		if err != nil {
+			return "", err
+		}
+		if i > 0 {
+			out = strings.TrimLeft(out, "\n")
+		}
+		b.WriteString(wrapOverflow(out, width))
+	}
+	return b.String(), nil
+}
+
+func glamourRender(content string, wrap int, theme Theme) (string, error) {
 	tr, err := glamour.NewTermRenderer(
 		glamour.WithStyles(selectStyle(theme)),
-		glamour.WithWordWrap(width),
+		glamour.WithWordWrap(wrap),
 		glamour.WithColorProfile(termenv.TrueColor),
 	)
 	if err != nil {
 		return "", err
 	}
-	out, err := tr.Render(content)
-	if err != nil {
-		return "", err
-	}
-	return hardWrapOverflow(out, width), nil
+	return tr.Render(content)
 }

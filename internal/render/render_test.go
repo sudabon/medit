@@ -134,3 +134,32 @@ func TestRenderWrapsLongUnbreakableLines(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderWrapsJapaneseWithoutEarlyBreaks(t *testing.T) {
+	src := "当初、「GLM-5.3という高性能AIを使い、AIに攻撃を任せる環境を作る」という案がありました。検討の結果、以下の理由から方針を見直しています（この見直し自体は担当者と合意済みです）。\n"
+	const width = 50
+	out, err := New().Render(src, width)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, line := range strings.Split(ansi.Strip(out), "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if !strings.Contains(lines[0], "GLM-5.3という") {
+		t.Fatalf("first line broke early: %q", lines[0])
+	}
+	for i, line := range lines {
+		if w := ansi.StringWidth(line); w > width {
+			t.Fatalf("line %d width %d exceeds %d: %q", i, w, width, line)
+		}
+		if i < len(lines)-1 && ansi.StringWidth(line) < width-2 {
+			t.Fatalf("line %d underfilled: %q", i, line)
+		}
+		if strings.ContainsAny(line[:len("、")], "、。）」") {
+			t.Fatalf("line %d starts with closing punctuation: %q", i, line)
+		}
+	}
+}
