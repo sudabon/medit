@@ -3,6 +3,8 @@ package render
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestRenderHeadingAndTable(t *testing.T) {
@@ -102,5 +104,33 @@ func TestRenderCachesUntilChange(t *testing.T) {
 	}
 	if out3 == out1 {
 		t.Fatal("content change should produce different output")
+	}
+}
+
+func TestRenderWrapsLongUnbreakableLines(t *testing.T) {
+	cases := map[string]string{
+		"japanese": strings.Repeat("これは長い日本語の文章です。", 20),
+		"no-space": strings.Repeat("abcdefghij", 30),
+		"url":      "see https://example.com/" + strings.Repeat("path/", 40),
+		"quote":    "> " + strings.Repeat("引用文", 50),
+		"list":     "- " + strings.Repeat("箇条書き", 40),
+	}
+	const width = 40
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := New()
+			out, err := r.Render("# T\n\n"+body+"\n\nnext\n", width)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, line := range strings.Split(out, "\n") {
+				if w := ansi.StringWidth(line); w > width {
+					t.Fatalf("line %d width %d exceeds %d: %q", i, w, width, ansi.Strip(line))
+				}
+			}
+			if !strings.Contains(ansi.Strip(out), "next") {
+				t.Fatalf("following paragraph missing: %q", ansi.Strip(out))
+			}
+		})
 	}
 }

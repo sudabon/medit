@@ -309,5 +309,9 @@ func renderMarkdown(content string, width int, theme Theme) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return tr.Render(content)
+	out, err := tr.Render(content)
+	if err != nil {
+		return "", err
+	}
+	return hardWrapOverflow(out, width), nil
 }
